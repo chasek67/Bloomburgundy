@@ -9,19 +9,29 @@ st.title("Bloomberg Dashboard")
 ticker = st.text_input("Enter ticker symbol", "MSFT")
 
 if ticker:
-    # Download data
-    df = yf.download(ticker, period="1y")
+    try:
+        # Download data
+        df = yf.download(ticker, period="1y")
 
-    # Handle MultiIndex columns if present
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(1)
+        # Flatten MultiIndex if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(1)
 
-    # Check if 'Adj Close' exists
-    if "Adj Close" not in df.columns:
-        st.error(f"'Adj Close' column not found in {ticker} data!")
-    else:
-        # Plot adjusted close
+        # Prefer 'Adj Close', fallback to 'Close'
+        if "Adj Close" in df.columns:
+            price_col = "Adj Close"
+        elif "Close" in df.columns:
+            price_col = "Close"
+            st.warning(f"'Adj Close' not found for {ticker}, using 'Close' instead.")
+        else:
+            st.error(f"No suitable price column found for {ticker}.")
+            st.stop()
+
+        # Plot
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df["Adj Close"], mode="lines", name=ticker))
-        fig.update_layout(title=f"{ticker} Adjusted Close Price", xaxis_title="Date", yaxis_title="Price")
+        fig.add_trace(go.Scatter(x=df.index, y=df[price_col], mode="lines", name=ticker))
+        fig.update_layout(title=f"{ticker} {price_col} Price", xaxis_title="Date", yaxis_title="Price")
         st.plotly_chart(fig)
+
+    except Exception as e:
+        st.error(f"Error downloading data for {ticker}: {e}")
