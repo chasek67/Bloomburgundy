@@ -67,23 +67,30 @@ with col1:
             )
             st.plotly_chart(fig1, use_container_width=True)
 
-            # --- Chart 2: Log Prices ---
+            # --- Chart 2: Cumulative Returns ---
+            cum_returns = (data / data.iloc[0] - 1) * 100  # percent growth
+
+            # Neon colors for lines
+            neon_colors = ["#39FF14", "#FF073A", "#00FFFF", "#FFAA00", "#FF00FF", "#0DFFFF", "#FF6EC7"]
+
             fig2 = go.Figure()
-            for ticker in data.columns:
+            for i, ticker in enumerate(cum_returns.columns):
                 fig2.add_trace(go.Scatter(
-                    x=data.index,
-                    y=np.log(data[ticker]),  # <-- use numpy directly
+                    x=cum_returns.index,
+                    y=cum_returns[ticker],
                     mode="lines",
-                    name=ticker
+                    name=ticker,
+                    line=dict(color=neon_colors[i % len(neon_colors)], width=3)
                 ))
             fig2.update_layout(
-                title="Log of Stock Prices (Normalized)",
+                title="Cumulative Returns (%)",
                 xaxis_title="Date",
-                yaxis_title="Log(Price)",
+                yaxis_title="Cumulative Return (%)",
                 template="plotly_dark",
                 paper_bgcolor="black",
                 plot_bgcolor="black",
-                font=dict(color="white")
+                font=dict(color="white"),
+                hovermode="x unified"
             )
             st.plotly_chart(fig2, use_container_width=True)
 
@@ -122,7 +129,7 @@ with col2:
                 }
 
                 for k, v in metrics.items():
-                    st.metric(label=k, value=v, delta_color="normal")  # delta_color=normal keeps text bright
+                    st.metric(label=k, value=v, delta_color="normal")
 
             except Exception as e:
                 st.warning(f"Could not fetch info for {ticker}: {e}")
