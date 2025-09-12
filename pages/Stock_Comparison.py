@@ -1,9 +1,10 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 
-# Set dark theme layout
+# Dark theme
 st.set_page_config(layout="wide", page_title="Stock Comparison")
 st.markdown(
     """
@@ -27,7 +28,6 @@ st.markdown(
 
 st.title("🚀 Stock Comparison Dashboard")
 
-# Layout: 2 columns
 col1, col2 = st.columns([2, 1])
 
 # ------------------- LEFT COLUMN -------------------
@@ -37,14 +37,13 @@ with col1:
 
     if tickers:
         try:
-            # Download multiple tickers
             raw = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=False)
 
-            # Flatten MultiIndex if present
+            # Flatten MultiIndex columns if present
             if isinstance(raw.columns, pd.MultiIndex):
                 raw.columns = [' '.join(col).strip() for col in raw.columns.values]
 
-            # Extract adjusted close columns for all tickers
+            # Extract adjusted close columns
             adj_close_cols = [col for col in raw.columns if 'Adj Close' in col]
             if not adj_close_cols:
                 adj_close_cols = [col for col in raw.columns if 'Close' in col]
@@ -68,12 +67,12 @@ with col1:
             )
             st.plotly_chart(fig1, use_container_width=True)
 
-            # --- Chart 2: Log Prices / Normalized ---
+            # --- Chart 2: Log Prices ---
             fig2 = go.Figure()
             for ticker in data.columns:
                 fig2.add_trace(go.Scatter(
                     x=data.index,
-                    y=data[ticker].apply(lambda x: pd.np.log(x)),
+                    y=np.log(data[ticker]),  # <-- use numpy directly
                     mode="lines",
                     name=ticker
                 ))
@@ -98,9 +97,21 @@ with col2:
         for ticker in tickers:
             try:
                 info = yf.Ticker(ticker).info
-                st.subheader(f"{ticker} Info")
+                st.subheader(f"{ticker} Info", anchor=None)
+
+                # Format large numbers nicely
+                def format_number(n):
+                    if n is None:
+                        return "N/A"
+                    elif n >= 1_000_000_000:
+                        return f"${n/1_000_000_000:,.2f} B"
+                    elif n >= 1_000_000:
+                        return f"${n/1_000_000:,.2f} M"
+                    else:
+                        return f"${n:,.0f}"
+
                 metrics = {
-                    "Market Cap": info.get("marketCap"),
+                    "Market Cap": format_number(info.get("marketCap")),
                     "P/E Ratio": info.get("trailingPE"),
                     "Forward P/E": info.get("forwardPE"),
                     "Dividend Yield": info.get("dividendYield"),
@@ -109,7 +120,9 @@ with col2:
                     "Day High": info.get("dayHigh"),
                     "Day Low": info.get("dayLow")
                 }
+
                 for k, v in metrics.items():
-                    st.metric(label=k, value=v)
+                    st.metric(label=k, value=v, delta_color="normal")  # delta_color=normal keeps text bright
+
             except Exception as e:
                 st.warning(f"Could not fetch info for {ticker}: {e}")
