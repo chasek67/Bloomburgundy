@@ -11,20 +11,27 @@ ticker = st.text_input("Enter ticker symbol", "MSFT")
 if ticker:
     try:
         # Download data
-        df = yf.download(ticker, period="1y")
+        df = yf.download(ticker, period="1y", group_by='ticker', auto_adjust=False)
 
-        # Flatten MultiIndex if present
+        # Flatten columns if MultiIndex
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(1)
+            df.columns = [' '.join(col).strip() for col in df.columns.values]
 
-        # Prefer 'Adj Close', fallback to 'Close'
-        if "Adj Close" in df.columns:
-            price_col = "Adj Close"
-        elif "Close" in df.columns:
-            price_col = "Close"
-            st.warning(f"'Adj Close' not found for {ticker}, using 'Close' instead.")
-        else:
-            st.error(f"No suitable price column found for {ticker}.")
+        # Try to find an adjusted close column
+        price_col = None
+        for col in df.columns:
+            if 'Adj Close' in col:
+                price_col = col
+                break
+        if not price_col:
+            for col in df.columns:
+                if 'Close' in col:
+                    price_col = col
+                    st.warning(f"'Adj Close' not found for {ticker}, using '{price_col}' instead.")
+                    break
+
+        if not price_col:
+            st.error(f"No suitable price column found for {ticker}. Columns: {df.columns}")
             st.stop()
 
         # Plot
