@@ -21,6 +21,9 @@ st.markdown(
     .stSelectbox>div>div>div>span {
         color: white;
     }
+    .stMetricLabel, .stMetricValue {
+        color: white;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -57,20 +60,20 @@ with col1:
             for ticker in data.columns:
                 fig1.add_trace(go.Scatter(x=data.index, y=data[ticker], mode="lines", name=ticker))
             fig1.update_layout(
-                title="Stock Prices",
-                xaxis_title="Date",
-                yaxis_title="Price",
+                title=dict(text="Stock Prices", font=dict(color="white")),
+                xaxis=dict(title="Date", titlefont=dict(color="white"), tickfont=dict(color="white")),
+                yaxis=dict(title="Price", titlefont=dict(color="white"), tickfont=dict(color="white")),
                 template="plotly_dark",
                 paper_bgcolor="black",
                 plot_bgcolor="black",
-                font=dict(color="white")
+                font=dict(color="white"),
+                legend=dict(font=dict(color="white"))
             )
             st.plotly_chart(fig1, use_container_width=True)
 
             # --- Chart 2: Cumulative Returns ---
             cum_returns = (data / data.iloc[0] - 1) * 100  # percent growth
 
-            # Neon colors for lines
             neon_colors = ["#39FF14", "#FF073A", "#00FFFF", "#FFAA00", "#FF00FF", "#0DFFFF", "#FF6EC7"]
 
             fig2 = go.Figure()
@@ -83,13 +86,14 @@ with col1:
                     line=dict(color=neon_colors[i % len(neon_colors)], width=3)
                 ))
             fig2.update_layout(
-                title="Cumulative Returns (%)",
-                xaxis_title="Date",
-                yaxis_title="Cumulative Return (%)",
+                title=dict(text="Cumulative Returns (%)", font=dict(color="white")),
+                xaxis=dict(title="Date", titlefont=dict(color="white"), tickfont=dict(color="white")),
+                yaxis=dict(title="Cumulative Return (%)", titlefont=dict(color="white"), tickfont=dict(color="white")),
                 template="plotly_dark",
                 paper_bgcolor="black",
                 plot_bgcolor="black",
                 font=dict(color="white"),
+                legend=dict(font=dict(color="white")),
                 hovermode="x unified"
             )
             st.plotly_chart(fig2, use_container_width=True)
@@ -99,7 +103,7 @@ with col1:
 
 # ------------------- RIGHT COLUMN -------------------
 with col2:
-    st.header("Company Comparison")
+    st.header("Company Comparison", anchor=None)
     if tickers:
         for ticker in tickers:
             try:
@@ -129,7 +133,7 @@ with col2:
                 }
 
                 for k, v in metrics.items():
-                    st.metric(label=k, value=v, delta_color="normal")
+                    st.metric(label=k, value=v, delta_color="normal")  # white text via CSS above
 
             except Exception as e:
-                st.warning(f"Could not fetch info for {ticker}: {e}")
+                st.warning(f"Could not fetch info for {ticker
