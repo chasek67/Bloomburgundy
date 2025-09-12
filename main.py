@@ -1,19 +1,27 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
 import pandas as pd
+import plotly.graph_objects as go
 
-st.title("📈 Market Overview")
+st.title("Bloomberg Dashboard")
 
-# Example ticker input
-ticker = st.text_input("Enter a ticker (e.g. AAPL, MSFT)", "AAPL")
+# Input ticker
+ticker = st.text_input("Enter ticker symbol", "MSFT")
 
 if ticker:
+    # Download data
     df = yf.download(ticker, period="1y")
 
-    if df.empty:
-        st.error(f"No data found for ticker: {ticker}")
+    # Handle MultiIndex columns if present
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(1)
+
+    # Check if 'Adj Close' exists
+    if "Adj Close" not in df.columns:
+        st.error(f"'Adj Close' column not found in {ticker} data!")
     else:
+        # Plot adjusted close
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df.index, y=df["Adj Close"], mode="lines", name=ticker))
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(title=f"{ticker} Adjusted Close Price", xaxis_title="Date", yaxis_title="Price")
+        st.plotly_chart(fig)
