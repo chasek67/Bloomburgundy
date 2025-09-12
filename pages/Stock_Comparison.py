@@ -1,27 +1,23 @@
 import streamlit as st
 import yfinance as yf
-import numpy as np
+import pandas as pd
 import plotly.express as px
 
-st.title("📈 Stock Comparison")
+st.title("📊 Stock Comparison")
 
-tickers = st.multiselect("Choose tickers:", ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"], default=["AAPL","MSFT"])
+tickers = st.text_input("Enter tickers separated by commas", "AAPL,MSFT,GOOGL")
+tickers = [t.strip().upper() for t in tickers.split(",") if t.strip()]
 
 if tickers:
     raw = yf.download(tickers, period="1y")
 
-    # If multiple tickers → MultiIndex, slice "Adj Close"
-    if isinstance(raw.columns, pd.MultiIndex):
-    data = raw["Adj Close"]
+    if raw.empty:
+        st.error("No data found. Please check your tickers.")
     else:
-    data = raw[["Adj Close"]]  # keep as DataFrame
+        # Handle single vs multiple tickers
+        if isinstance(raw.columns, pd.MultiIndex):
+            data = raw["Adj Close"]
+        else:
+            data = raw[["Adj Close"]]
 
-
-    # Normal scale plot
-    st.subheader("Raw Prices")
-    st.line_chart(data)
-
-    # Log scale
-    st.subheader("Log-Scaled Prices")
-    log_data = np.log(data / data.iloc[0])  # log returns
-    st.line_chart(log_data)
+        st.line_chart(data)
