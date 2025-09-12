@@ -13,6 +13,10 @@ indexes = {"S&P 500": "^GSPC", "Dow Jones": "^DJI", "NASDAQ": "^IXIC",
 data = {}
 for name, ticker in indexes.items():
     df = yf.download(ticker, period="1y")
+    if isinstance(df.columns, pd.MultiIndex):
+    df = df["Adj Close"]
+
+    fig.add_trace(go.Scatter(x=df.index, y=df["Adj Close"] if "Adj Close" in df else df, mode="lines", name=name))
     data[name] = df
 
 # Plot comparison
