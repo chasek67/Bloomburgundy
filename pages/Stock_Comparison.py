@@ -8,7 +8,14 @@ st.title("📈 Stock Comparison")
 tickers = st.multiselect("Choose tickers:", ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"], default=["AAPL","MSFT"])
 
 if tickers:
-    data = yf.download(tickers, period="1y")["Adj Close"]
+    raw = yf.download(tickers, period="1y")
+
+    # If multiple tickers → MultiIndex, slice "Adj Close"
+    if isinstance(raw.columns, pd.MultiIndex):
+    data = raw["Adj Close"]
+    else:
+    data = raw[["Adj Close"]]  # keep as DataFrame
+
 
     # Normal scale plot
     st.subheader("Raw Prices")
