@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import plotly.graph_objects as go
 from pathlib import Path
+import plotly.graph_objects as go
 
-# ---------------- Page Setup & Theme ----------------
 st.set_page_config(page_title="Portfolio Builder", layout="wide")
 
+# --- Local page CSS (kept here too, in case main isn't loaded) ---
 st.markdown("""
 <style>
   [data-testid="stSidebar"] { background-color: #111 !important; color: #eee !important; }
@@ -16,6 +16,7 @@ st.markdown("""
   [data-testid="stSidebarNav"] a:hover { background: #1d1f23 !important; }
   .stApp { background-color: #0e0e0e; color: #e6e6e6; }
   .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
+  .status { font-size:0.9rem; color:#ddd; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -28,7 +29,6 @@ with st.sidebar:
     with c1: t1 = st.text_input("Asset 1", "AAPL").strip().upper()
     with c2: t2 = st.text_input("Asset 2", "MSFT").strip().upper()
     with c3: t3 = st.text_input("Asset 3", "GOOGL").strip().upper()
-
     tickers = [t for t in [t1, t2, t3] if t]
 
     st.markdown("---")
@@ -63,42 +63,70 @@ if normalize:
     weights_pct = 100 * weights_pct / s
 w = weights_pct / 100.0
 
-# ---------------- Robust Data Loader (same strategy as comparison) ----------------
+# ---------------- Robust Data Loader with Status ----------------
 DATA_DIR = Path("Data")
 
-def load_from_combined_csv(tickers, data_dir=DATA_DIR):
-    p = data_dir / "prices_combined.csv"
+def _read_csv_robust(path, header_rows):
+    # Try multiple engines/encodings, skip bad lines
+    for enc in ("utf-8", "utf-8-sig", "latin-1"):
+        for eng in ("python", "c"):
+            try:
+                return pd.read_csv(path, index_col=0, header=header_rows,
+                                   parse_dates=True, encoding=enc, engine=eng,
+                                   on_bad_lines="skip")
+            except Exception:
+                continue
+    return None
+
+def _load_from_combined_csv(tickers):
+    p = DATA_DIR / "prices_combined.csv"
     if not p.exists():
         return None
-    df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
-    cols = []
-    for t in tickers:
-        if ("Adj Close", t) in df.columns:
-            cols.append(df[("Adj Close", t)].rename(t))
-        elif ("Close", t) in df.columns:
-            cols.append(df[("Close", t)].rename(t))
-    if not cols:
-        return None
-    return pd.concat(cols, axis=1).sort_index().dropna(how="all")
+    # Try yfinance MultiIndex first
+    df = _read_csv_robust(p, header_rows=[0,1])
+    if df is not None and isinstance(df.columns, pd.MultiIndex):
+        cols = []
+        for t in tickers:
+            if ("Adj Close", t) in df.columns:
+                cols.append(df[("Adj Close", t)].rename(t))
+            elif ("Close", t) in df.columns:
+                cols.append(df[("Close", t)].rename(t))
+        if cols:
+            return pd.concat(cols, axis=1).sort_index().dropna(how="all")
+    # Try simple wide: Date,AAPL,MSFT,...
+    df2 = _read_csv_robust(p, header_rows=0)
+    if df2 is not None:
+        keep = [c for c in df2.columns if c.upper() in [x.upper() for x in tickers]]
+        if keep:
+            df2 = df2.rename(columns={c:c.upper() for c in df2.columns})
+            return df2[[t.upper() for t in tickers if t.upper() in df2.columns]].sort_index().dropna(how="all")
+    return None
 
-def load_from_per_ticker_csvs(tickers, data_dir=DATA_DIR):
-    series = []
+def _load_from_per_ticker_csvs(tickers):
+    frames = []
     for t in tickers:
-        p = data_dir / f"{t}.csv"
+        p = DATA_DIR / f"{t}.csv"
         if not p.exists():
             return None
-        df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
-        if ("Adj Close", t) in df.columns:
-            series.append(df[("Adj Close", t)].rename(t))
-        elif ("Close", t) in df.columns:
-            series.append(df[("Close", t)].rename(t))
-        else:
+        df = _read_csv_robust(p, header_rows=[0,1])
+        if df is not None and isinstance(df.columns, pd.MultiIndex):
+            if ("Adj Close", t) in df.columns:
+                frames.append(df[("Adj Close", t)].rename(t)); continue
+            if ("Close", t) in df.columns:
+                frames.append(df[("Close", t)].rename(t)); continue
+        # Fallback: simple single-level (Date,Adj Close)
+        df2 = _read_csv_robust(p, header_rows=0)
+        if df2 is None:
             return None
-    return pd.concat(series, axis=1).sort_index().dropna(how="all")
+        col = "Adj Close" if "Adj Close" in df2.columns else ("Close" if "Close" in df2.columns else None)
+        if col is None:
+            return None
+        frames.append(df2[col].rename(t))
+    return pd.concat(frames, axis=1).sort_index().dropna(how="all")
 
 @st.cache_data(show_spinner=False)
 def load_prices(tickers, period):
-    # 1) Yahoo (auto_adjust=True → use "Close")
+    # 1) Yahoo first
     try:
         df = yf.download(tickers, period=period, auto_adjust=True, group_by="ticker", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
@@ -107,7 +135,7 @@ def load_prices(tickers, period):
             elif "Adj Close" in df.columns.get_level_values(0):
                 df = df["Adj Close"]
             else:
-                raise KeyError("Neither Close nor Adj Close in Yahoo result.")
+                raise KeyError("No Close/Adj Close in Yahoo result.")
         else:
             if "Close" in df.columns:
                 df = df[["Close"]]
@@ -117,40 +145,42 @@ def load_prices(tickers, period):
         df = df.dropna(how="all")
         if df.empty:
             raise ValueError("Empty Yahoo data")
-        return df
+        return df, "Yahoo Finance"
     except Exception:
         pass
-
     # 2) Combined CSV
-    local = load_from_combined_csv(tickers)
+    local = _load_from_combined_csv(tickers)
     if local is not None and not local.empty:
-        return local
-
+        return local, "Data/prices_combined.csv"
     # 3) Per-ticker CSVs
-    local2 = load_from_per_ticker_csvs(tickers)
+    local2 = _load_from_per_ticker_csvs(tickers)
     if local2 is not None and not local2.empty:
-        return local2
+        return local2, "Data/<ticker>.csv files"
+    # Fail
+    return None, None
 
-    raise RuntimeError("No data from Yahoo or local CSVs. Add CSVs under Data/ or check tickers.")
-
-# ---------------- Math & Charts ----------------
-try:
-    prices = load_prices(tickers, _period(horizon))
-except Exception as e:
-    st.error(f"Error loading data: {e}")
+prices, source = load_prices(tickers, _period(horizon))
+if prices is None:
+    st.error("No data from Yahoo or local CSVs. Verify tickers and that Data/prices_combined.csv exists.")
     st.stop()
 
+# Status panel
+with st.expander("Data source & columns", expanded=False):
+    st.markdown(f"<div class='status'>Source: <b>{source}</b></div>", unsafe_allow_html=True)
+    st.write("Columns loaded:", list(prices.columns))
+    st.write("Rows:", len(prices))
+
+# ---------------- Math & Charts ----------------
 rets = prices.pct_change().fillna(0.0)
 port_ret = (rets * w).sum(axis=1)
 port_cum = (1 + port_ret).cumprod()
 indiv_cum = (1 + rets).cumprod()
 
-# Normalized chart with thick red portfolio
 indiv_rebased = indiv_cum / indiv_cum.iloc[0] * 100
 port_rebased = port_cum / port_cum.iloc[0] * 100
 
 fig = go.Figure()
-for t in tickers:
+for t in prices.columns:
     fig.add_trace(go.Scatter(x=indiv_rebased.index, y=indiv_rebased[t], name=t, mode="lines", line=dict(width=2)))
 fig.add_trace(go.Scatter(x=port_rebased.index, y=port_rebased.values, name="Portfolio",
                          mode="lines", line=dict(color="red", width=5)))
@@ -177,11 +207,11 @@ with m1:
 with m2:
     st.markdown(f"<div class='metric-card'><h3>Portfolio Sharpe Ratio</h3><h2>{port_sharpe:,.2f}</h2></div>", unsafe_allow_html=True)
 
-def cum_return(series):  # from cumulative index
+def cum_return(series):
     return series.iloc[-1] / series.iloc[0] - 1.0
 
 rows = []
-for i, t in enumerate(tickers):
+for i, t in enumerate(prices.columns):
     rows.append([t, f"{weights_pct[i]:.2f}%", f"{cum_return(indiv_cum[t])*100:,.2f}%",
                  f"{sharpe_from_prices(indiv_cum[t], rf_annual_pct=rf, periods_per_year=ann):.2f}"])
 summary = pd.DataFrame(rows, columns=["Ticker","Weight","Cumulative Return","Sharpe Ratio"])
