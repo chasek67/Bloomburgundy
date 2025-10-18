@@ -1,0 +1,36 @@
+# make_price_csvs.py
+import pandas as pd
+import yfinance as yf
+from pathlib import Path
+
+DATA_DIR = Path("Data")
+DATA_DIR.mkdir(exist_ok=True)
+
+TICKERS = [
+    "AAPL","MSFT","GOOGL","AMZN","META",
+    "NVDA","TSLA","JPM","V","MA",
+    "HD","PG","UNH","XOM","JNJ",
+    "WMT","KO","PEP","NFLX","DIS",
+    "AMD","INTC","BA","NKE","PYPL"
+]
+
+period = "5y"
+interval = "1d"
+
+print("Downloading combined matrix...")
+# combined with multiindex columns: ('Adj Close'/'Close', TICKER)
+df_all = yf.download(TICKERS, period=period, interval=interval, auto_adjust=False, group_by="ticker")
+# yfinance multi-ticker returns MultiIndex columns at top level: (field, ticker)
+# Ensure expected ordering and write
+df_all.to_csv(DATA_DIR / "prices_combined.csv")
+
+print("Downloading individual files...")
+for t in TICKERS:
+    df = yf.download(t, period=period, interval=interval, auto_adjust=False, group_by="ticker")
+    # single ticker can return single-level cols; convert to MultiIndex for consistency
+    if not isinstance(df.columns, pd.MultiIndex):
+        df.columns = pd.MultiIndex.from_product([df.columns, [t]])
+    df.to_csv(DATA_DIR / f"{t}.csv")
+
+print("Done. Files saved under Data/")
+
