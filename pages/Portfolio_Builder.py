@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from pathlib import Path
 
 # ---------- Page Setup ----------
 st.set_page_config(layout="wide", page_title="Portfolio Builder")
@@ -66,17 +67,39 @@ if normalize:
     weights = 100 * weights / s
 
 @st.cache_data(show_spinner=False)
-def load_prices(tickers, period):
-    df = yf.download(tickers, period=period, auto_adjust=True)["Adj Close"]
-    if isinstance(df, pd.Series):
-        df = df.to_frame(name=tickers[0])
-    return df
+def load_from_csv_if_exists(tickers, data_dir="Data"):
+    data_dir = Path(data_dir)
+    frames = []
+    have_all = True
+    for t in tickers:
+        p = data_dir / f"{t}.csv"
+        if not p.exists():
+            have_all = False
+            break
+        df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
+        if ("Adj Close", t) in df.columns:
+            s = df[("Adj Close", t)].rename(t)
+        elif ("Close", t) in df.columns:
+            s = df[("Close", t)].rename(t)
+        else:
+            have_all = False
+            break
+        frames.append(s)
+    if have_all and frames:
+        return pd.concat(frames, axis=1).sort_index().dropna(how="all")
+    return None  # signal to fallback
 
-try:
-    prices = load_prices(tickers, _period(horizon))
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+@st.cache_data(show_spinner=False)
+def load_prices(tickers, period):
+    local = load_from_csv_if_exists(tickers)
+    if local is not None:
+        return local
+    df = yf.download(tickers, period=period, auto_adjust=True)
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df["Close"]
+    else:
+        df = df[["Close"]].rename(columns={"Close": tickers[0]})
+    return df.dropna(how="all")
 
 rets = prices.pct_change().fillna(0.0)
 w = weights / 100.0
