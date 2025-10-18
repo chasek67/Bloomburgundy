@@ -7,6 +7,21 @@ from pathlib import Path
 
 # ---------- Page Setup ----------
 st.set_page_config(layout="wide", page_title="Portfolio Builder")
+st.markdown("""
+<style>
+  [data-testid="stSidebar"] {
+    background-color: #111 !important;
+    color: #eee !important;
+  }
+  [data-testid="stSidebar"] * { color: #eee !important; }
+  [data-testid="stSidebarNav"] a { color: #d6e0ff !important; }
+  [data-testid="stSidebarNav"] a:hover {
+    background: #1d1f23 !important;
+  }
+  .stApp { background-color: #0e0e0e; color: #e6e6e6; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("💼 Portfolio Builder")
 
 # ---------- Styling ----------
