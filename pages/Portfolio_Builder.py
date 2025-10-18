@@ -4,108 +4,135 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
+# ---------- Page Setup ----------
 st.set_page_config(layout="wide", page_title="Portfolio Builder")
-
 st.title("💼 Portfolio Builder")
 
-# ---------- Light theme styling ----------
-st.markdown("""
-<style>
-    .stApp { background-color: #ffffff; color: #000000; }
-    h1,h2,h3,h4,h5,h6,p,span,div,label { color: #000000 !important; }
-</style>
-""", unsafe_allow_html=True)
+# ---------- Styling ----------
+st.markdown(
+    """
+    <style>
+        .stApp { background-color: #0e0e0e; color: #e6e6e6; }
+        h1,h2,h3,h4,h5,h6,p,span,div,label { color: #e6e6e6 !important; }
+        .stTextInput>div>div>input, .stSlider, .stSelectbox div, .stNumberInput input {
+            background-color: #1a1a1a;
+            color: #e6e6e6 !important;
+        }
+        .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# ---------- Session state ----------
-if "portfolio_tickers" not in st.session_state:
-    st.session_state.portfolio_tickers = ["AAPL", "MSFT"]
-if "portfolio_weights" not in st.session_state:
-    st.session_state.portfolio_weights = [0.5, 0.5]
+# ---------- Controls ----------
+with st.sidebar:
+    st.header("Portfolio Inputs")
+    c1, c2, c3 = st.columns(3)
+    with c1: t1 = st.text_input("Asset 1", "AAPL").strip().upper()
+    with c2: t2 = st.text_input("Asset 2", "MSFT").strip().upper()
+    with c3: t3 = st.text_input("Asset 3", "GOOGL").strip().upper()
 
-col1, col2 = st.columns([1, 2])
+    tickers = [t for t in [t1, t2, t3] if t]
 
-with col1:
-    st.subheader("Portfolio Setup")
-
-    new_ticker = st.text_input("Add Stock", "")
-    if st.button("Add Stock"):
-        t = new_ticker.strip().upper()
-        if t and t not in st.session_state.portfolio_tickers:
-            st.session_state.portfolio_tickers.append(t)
-            st.session_state.portfolio_weights.append(1.0)
-        else:
-            st.warning("Invalid or duplicate ticker.")
-
-    if st.button("Clear Portfolio"):
-        st.session_state.portfolio_tickers = []
-        st.session_state.portfolio_weights = []
-
-    for i, t in enumerate(st.session_state.portfolio_tickers):
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            st.markdown(f"**{t}**")
-        with c2:
-            st.session_state.portfolio_weights[i] = st.number_input(
-                f"Weight {t}", min_value=0.0, max_value=1.0,
-                value=float(st.session_state.portfolio_weights[i]), key=f"w_{t}_{i}"
-            )
-        with c3:
-            if st.button("❌", key=f"del_{t}_{i}"):
-                st.session_state.portfolio_tickers.pop(i)
-                st.session_state.portfolio_weights.pop(i)
-                st.experimental_rerun()
-
-    normalize = st.checkbox("Normalize Weights", True)
-    if normalize and sum(st.session_state.portfolio_weights) > 0:
-        total = sum(st.session_state.portfolio_weights)
-        st.session_state.portfolio_weights = [w / total for w in st.session_state.portfolio_weights]
-
-    horizon = st.selectbox("Select Time Horizon", ["1M", "3M", "6M", "1Y", "5Y", "YTD", "Max"], index=3)
-
-def get_period(h):
-    return {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y", "YTD": "ytd", "Max": "max"}[h]
-
-with col2:
-    if len(st.session_state.portfolio_tickers) == 0:
-        st.info("Add tickers to build your portfolio.")
+    st.markdown("---")
+    st.subheader("Weights")
+    w1 = st.slider(f"{t1 or 'Asset 1'} weight (%)", 0, 100, 33, 1)
+    w2 = st.slider(f"{t2 or 'Asset 2'} weight (%)", 0, 100, 33, 1)
+    auto_third = st.checkbox("Auto-balance third weight so total = 100%", True)
+    if auto_third:
+        w3 = max(0, 100 - w1 - w2)
+        st.write(f"{t3 or 'Asset 3'} weight (%): **{w3}**")
     else:
-        try:
-            data = yf.download(st.session_state.portfolio_tickers, period=get_period(horizon))["Adj Close"]
-            weights = np.array(st.session_state.portfolio_weights)
-            if normalize:
-                weights = weights / weights.sum()
+        w3 = st.slider(f"{t3 or 'Asset 3'} weight (%)", 0, 100, 34, 1)
 
-            daily_returns = data.pct_change().fillna(0)
-            portfolio_return = (daily_returns * weights).sum(axis=1)
-            portfolio_cum = (np.cumprod(1 + portfolio_return) - 1) * 100
-            cum_returns = (data / data.iloc[0] - 1) * 100
+    normalize = st.checkbox("Normalize weights to sum 100%", True)
+    rf = st.number_input("Risk-free rate (annual, %)", value=0.0, step=0.25)
+    horizon = st.selectbox("Time Horizon", ["6M", "1Y", "3Y", "5Y", "YTD", "Max"], index=1)
+    show_table = st.checkbox("Show performance table", True)
 
-            fig = go.Figure()
-            for t in cum_returns.columns:
-                fig.add_trace(go.Scatter(x=cum_returns.index, y=cum_returns[t], mode="lines", name=t))
-            fig.add_trace(go.Scatter(x=cum_returns.index, y=portfolio_cum, mode="lines", name="Portfolio",
-                                     line=dict(color="red", width=3)))
-            fig.update_layout(title="Portfolio vs Individual Stocks", xaxis_title="Date",
-                              yaxis_title="Cumulative Return (%)", template="plotly_white")
-            st.plotly_chart(fig, use_container_width=True)
+def _period(h: str) -> str:
+    return {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "YTD": "ytd", "Max": "max"}[h]
 
-            def sharpe_ratio(series):
-                rets = series.pct_change().dropna()
-                return np.sqrt(252) * rets.mean() / rets.std() if rets.std() != 0 else np.nan
+if len(tickers) < 3:
+    st.info("Please provide three tickers.")
+    st.stop()
 
-            stats = []
-            for t in data.columns:
-                cum = (data[t].iloc[-1] / data[t].iloc[0]) - 1
-                stats.append([t, f"{weights[list(data.columns).index(t)]:.2%}",
-                              f"{cum*100:.2f}%", f"{sharpe_ratio(data[t]):.2f}"])
+weights = np.array([w1, w2, w3], dtype=float)
+if normalize:
+    s = weights.sum()
+    if s == 0:
+        st.error("Weights sum to zero. Adjust sliders.")
+        st.stop()
+    weights = 100 * weights / s
 
-            port_cum = portfolio_cum.iloc[-1] / 100
-            port_sharpe = np.sqrt(252) * portfolio_return.mean() / portfolio_return.std()
-            stats.append(["Portfolio", "100%", f"{port_cum*100:.2f}%", f"{port_sharpe:.2f}"])
+@st.cache_data(show_spinner=False)
+def load_prices(tickers, period):
+    df = yf.download(tickers, period=period, auto_adjust=True)["Adj Close"]
+    if isinstance(df, pd.Series):
+        df = df.to_frame(name=tickers[0])
+    return df
 
-            st.subheader("Performance Summary")
-            df = pd.DataFrame(stats, columns=["Ticker", "Weight", "Cumulative Return", "Sharpe Ratio"])
-            st.dataframe(df, use_container_width=True)
+try:
+    prices = load_prices(tickers, _period(horizon))
+except Exception as e:
+    st.error(f"Error loading data: {e}")
+    st.stop()
 
-        except Exception as e:
-            st.error(f"Error loading data: {e}")
+rets = prices.pct_change().fillna(0.0)
+w = weights / 100.0
+port_ret = (rets * w).sum(axis=1)
+port_cum = (1 + port_ret).cumprod()
+indiv_cum = (1 + rets).cumprod()
+
+fig = go.Figure()
+indiv_rebased = indiv_cum / indiv_cum.iloc[0] * 100
+port_rebased = port_cum / port_cum.iloc[0] * 100
+
+for t in tickers:
+    fig.add_trace(go.Scatter(x=indiv_rebased.index, y=indiv_rebased[t], name=t, mode="lines", line=dict(width=2)))
+fig.add_trace(go.Scatter(x=port_rebased.index, y=port_rebased.values, name="Portfolio",
+                         mode="lines", line=dict(color="red", width=5)))
+fig.update_layout(title="Normalized Price (Rebased to 100) — Portfolio vs Assets",
+                  xaxis_title="Date", yaxis_title="Index (100 = start)",
+                  template="plotly_dark", paper_bgcolor="#000", plot_bgcolor="#000",
+                  legend=dict(orientation="h", y=-0.2))
+st.plotly_chart(fig, use_container_width=True, height=560)
+
+def sharpe(series, rf_annual_pct=0.0, periods_per_year=252):
+    r = series.pct_change().dropna()
+    if r.std() == 0: return np.nan
+    rf = rf_annual_pct / 100.0
+    return np.sqrt(periods_per_year) * ((r.mean() - rf / periods_per_year) / r.std())
+
+ann_factor = 252
+port_sharpe = sharpe(port_cum, rf_annual_pct=rf, periods_per_year=ann_factor)
+port_cum_return = port_rebased.iloc[-1] / 100 - 1.0
+
+m1, m2 = st.columns(2)
+with m1:
+    st.markdown(f"<div class='metric-card'><h3>Portfolio Cumulative Return</h3><h2>{port_cum_return*100:,.2f}%</h2></div>", unsafe_allow_html=True)
+with m2:
+    st.markdown(f"<div class='metric-card'><h3>Portfolio Sharpe Ratio</h3><h2>{port_sharpe:,.2f}</h2></div>", unsafe_allow_html=True)
+
+def cum_return(series):
+    return series.iloc[-1] / series.iloc[0] - 1.0
+
+rows = []
+for i, t in enumerate(tickers):
+    rows.append([
+        t,
+        f"{weights[i]:.2f}%",
+        f"{cum_return(indiv_cum[t]) * 100:,.2f}%",
+        f"{sharpe(indiv_cum[t], rf_annual_pct=rf, periods_per_year=ann_factor):.2f}",
+    ])
+
+summary = pd.DataFrame(rows, columns=["Ticker", "Weight", "Cumulative Return", "Sharpe Ratio"])
+summary.loc[len(summary)] = ["Portfolio", "100.00%", f"{port_cum_return*100:,.2f}%", f"{port_sharpe:,.2f}"]
+
+if show_table:
+    st.subheader("Performance Summary")
+    st.dataframe(summary, use_container_width=True)
+
+st.download_button("⬇️ Download portfolio returns CSV",
+                   data=port_ret.to_frame("portfolio_return").to_csv().encode(),
+                   file_name="portfolio_returns.csv", mime="text/csv")
