@@ -154,7 +154,7 @@ with col1:
                 fig_stock.update_layout(
                     title=f"{ticker} Stock Price",
                     xaxis_title="Date", yaxis_title="Price",
-                    template="plotly_dark", paper_bgcolor="black", plot_bgcolor="black",
+                    template="plotly_dark", paper_bgcolor="#111111", plot_bgcolor="#111111",
                     font=dict(color="white")
                 )
                 st.plotly_chart(fig_stock, use_container_width=True)
@@ -169,7 +169,7 @@ with col1:
                 fig_market.update_layout(
                     title=f"{market_choice} Price Overview",
                     xaxis_title="Date", yaxis_title="Price",
-                    template="plotly_dark", paper_bgcolor="black", plot_bgcolor="black",
+                    template="plotly_dark", paper_bgcolor="#111111", plot_bgcolor="#111111",
                     font=dict(color="white")
                 )
                 st.plotly_chart(fig_market, use_container_width=True)
@@ -216,7 +216,7 @@ with col2:
                 fig_vol.update_layout(
                     title="Daily Trading Volume",
                     xaxis_title="Date", yaxis_title="Volume",
-                    template="plotly_dark", paper_bgcolor="black", plot_bgcolor="black",
+                    template="plotly_dark", paper_bgcolor="#111111", plot_bgcolor="#111111",
                     font=dict(color="white")
                 )
                 st.plotly_chart(fig_vol, use_container_width=True)
