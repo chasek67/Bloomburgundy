@@ -1,46 +1,27 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import plotly.graph_objects as go
 from pathlib import Path
 
-# ---------- Page Setup ----------
-st.set_page_config(layout="wide", page_title="Portfolio Builder")
+# ---------------- Page Setup & Theme ----------------
+st.set_page_config(page_title="Portfolio Builder", layout="wide")
+
 st.markdown("""
 <style>
-  [data-testid="stSidebar"] {
-    background-color: #111 !important;
-    color: #eee !important;
-  }
+  [data-testid="stSidebar"] { background-color: #111 !important; color: #eee !important; }
   [data-testid="stSidebar"] * { color: #eee !important; }
-  [data-testid="stSidebarNav"] a { color: #d6e0ff !important; }
-  [data-testid="stSidebarNav"] a:hover {
-    background: #1d1f23 !important;
-  }
+  [data-testid="stSidebarNav"] a { color: #cfe1ff !important; }
+  [data-testid="stSidebarNav"] a:hover { background: #1d1f23 !important; }
   .stApp { background-color: #0e0e0e; color: #e6e6e6; }
+  .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("💼 Portfolio Builder")
 
-# ---------- Styling ----------
-st.markdown(
-    """
-    <style>
-        .stApp { background-color: #0e0e0e; color: #e6e6e6; }
-        h1,h2,h3,h4,h5,h6,p,span,div,label { color: #e6e6e6 !important; }
-        .stTextInput>div>div>input, .stSlider, .stSelectbox div, .stNumberInput input {
-            background-color: #1a1a1a;
-            color: #e6e6e6 !important;
-        }
-        .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ---------- Controls ----------
+# ---------------- Controls ----------------
 with st.sidebar:
     st.header("Portfolio Inputs")
     c1, c2, c3 = st.columns(3)
@@ -67,65 +48,108 @@ with st.sidebar:
     show_table = st.checkbox("Show performance table", True)
 
 def _period(h: str) -> str:
-    return {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "YTD": "ytd", "Max": "max"}[h]
+    return {"6M":"6mo","1Y":"1y","3Y":"3y","5Y":"5y","YTD":"ytd","Max":"max"}[h]
 
 if len(tickers) < 3:
     st.info("Please provide three tickers.")
     st.stop()
 
-weights = np.array([w1, w2, w3], dtype=float)
+weights_pct = np.array([w1, w2, w3], dtype=float)
 if normalize:
-    s = weights.sum()
+    s = weights_pct.sum()
     if s == 0:
         st.error("Weights sum to zero. Adjust sliders.")
         st.stop()
-    weights = 100 * weights / s
+    weights_pct = 100 * weights_pct / s
+w = weights_pct / 100.0
 
-@st.cache_data(show_spinner=False)
-def load_from_csv_if_exists(tickers, data_dir="Data"):
-    data_dir = Path(data_dir)
-    frames = []
-    have_all = True
+# ---------------- Robust Data Loader (same strategy as comparison) ----------------
+DATA_DIR = Path("Data")
+
+def load_from_combined_csv(tickers, data_dir=DATA_DIR):
+    p = data_dir / "prices_combined.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
+    cols = []
+    for t in tickers:
+        if ("Adj Close", t) in df.columns:
+            cols.append(df[("Adj Close", t)].rename(t))
+        elif ("Close", t) in df.columns:
+            cols.append(df[("Close", t)].rename(t))
+    if not cols:
+        return None
+    return pd.concat(cols, axis=1).sort_index().dropna(how="all")
+
+def load_from_per_ticker_csvs(tickers, data_dir=DATA_DIR):
+    series = []
     for t in tickers:
         p = data_dir / f"{t}.csv"
         if not p.exists():
-            have_all = False
-            break
+            return None
         df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
         if ("Adj Close", t) in df.columns:
-            s = df[("Adj Close", t)].rename(t)
+            series.append(df[("Adj Close", t)].rename(t))
         elif ("Close", t) in df.columns:
-            s = df[("Close", t)].rename(t)
+            series.append(df[("Close", t)].rename(t))
         else:
-            have_all = False
-            break
-        frames.append(s)
-    if have_all and frames:
-        return pd.concat(frames, axis=1).sort_index().dropna(how="all")
-    return None  # signal to fallback
+            return None
+    return pd.concat(series, axis=1).sort_index().dropna(how="all")
 
 @st.cache_data(show_spinner=False)
 def load_prices(tickers, period):
-    local = load_from_csv_if_exists(tickers)
-    if local is not None:
+    # 1) Yahoo (auto_adjust=True → use "Close")
+    try:
+        df = yf.download(tickers, period=period, auto_adjust=True, group_by="ticker", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            if "Close" in df.columns.get_level_values(0):
+                df = df["Close"]
+            elif "Adj Close" in df.columns.get_level_values(0):
+                df = df["Adj Close"]
+            else:
+                raise KeyError("Neither Close nor Adj Close in Yahoo result.")
+        else:
+            if "Close" in df.columns:
+                df = df[["Close"]]
+            elif "Adj Close" in df.columns:
+                df = df[["Adj Close"]]
+            df.columns = [tickers[0]]
+        df = df.dropna(how="all")
+        if df.empty:
+            raise ValueError("Empty Yahoo data")
+        return df
+    except Exception:
+        pass
+
+    # 2) Combined CSV
+    local = load_from_combined_csv(tickers)
+    if local is not None and not local.empty:
         return local
-    df = yf.download(tickers, period=period, auto_adjust=True)
-    if isinstance(df.columns, pd.MultiIndex):
-        df = df["Close"]
-    else:
-        df = df[["Close"]].rename(columns={"Close": tickers[0]})
-    return df.dropna(how="all")
+
+    # 3) Per-ticker CSVs
+    local2 = load_from_per_ticker_csvs(tickers)
+    if local2 is not None and not local2.empty:
+        return local2
+
+    raise RuntimeError("No data from Yahoo or local CSVs. Add CSVs under Data/ or check tickers.")
+
+# ---------------- Math & Charts ----------------
+try:
+    prices = load_prices(tickers, _period(horizon))
+except Exception as e:
+    st.error(f"Error loading data: {e}")
+    st.stop()
 
 rets = prices.pct_change().fillna(0.0)
-w = weights / 100.0
 port_ret = (rets * w).sum(axis=1)
 port_cum = (1 + port_ret).cumprod()
 indiv_cum = (1 + rets).cumprod()
 
-fig = go.Figure()
+# Normalized chart with thick red portfolio
 indiv_rebased = indiv_cum / indiv_cum.iloc[0] * 100
 port_rebased = port_cum / port_cum.iloc[0] * 100
 
+fig = go.Figure()
 for t in tickers:
     fig.add_trace(go.Scatter(x=indiv_rebased.index, y=indiv_rebased[t], name=t, mode="lines", line=dict(width=2)))
 fig.add_trace(go.Scatter(x=port_rebased.index, y=port_rebased.values, name="Portfolio",
@@ -136,14 +160,15 @@ fig.update_layout(title="Normalized Price (Rebased to 100) — Portfolio vs Asse
                   legend=dict(orientation="h", y=-0.2))
 st.plotly_chart(fig, use_container_width=True, height=560)
 
-def sharpe(series, rf_annual_pct=0.0, periods_per_year=252):
+def sharpe_from_prices(series, rf_annual_pct=0.0, periods_per_year=252):
     r = series.pct_change().dropna()
-    if r.std() == 0: return np.nan
+    if r.std() == 0:
+        return np.nan
     rf = rf_annual_pct / 100.0
-    return np.sqrt(periods_per_year) * ((r.mean() - rf / periods_per_year) / r.std())
+    return np.sqrt(periods_per_year) * ((r.mean() - rf/periods_per_year) / r.std())
 
-ann_factor = 252
-port_sharpe = sharpe(port_cum, rf_annual_pct=rf, periods_per_year=ann_factor)
+ann = 252
+port_sharpe = sharpe_from_prices(port_cum, rf_annual_pct=rf, periods_per_year=ann)
 port_cum_return = port_rebased.iloc[-1] / 100 - 1.0
 
 m1, m2 = st.columns(2)
@@ -152,20 +177,15 @@ with m1:
 with m2:
     st.markdown(f"<div class='metric-card'><h3>Portfolio Sharpe Ratio</h3><h2>{port_sharpe:,.2f}</h2></div>", unsafe_allow_html=True)
 
-def cum_return(series):
+def cum_return(series):  # from cumulative index
     return series.iloc[-1] / series.iloc[0] - 1.0
 
 rows = []
 for i, t in enumerate(tickers):
-    rows.append([
-        t,
-        f"{weights[i]:.2f}%",
-        f"{cum_return(indiv_cum[t]) * 100:,.2f}%",
-        f"{sharpe(indiv_cum[t], rf_annual_pct=rf, periods_per_year=ann_factor):.2f}",
-    ])
-
-summary = pd.DataFrame(rows, columns=["Ticker", "Weight", "Cumulative Return", "Sharpe Ratio"])
-summary.loc[len(summary)] = ["Portfolio", "100.00%", f"{port_cum_return*100:,.2f}%", f"{port_sharpe:,.2f}"]
+    rows.append([t, f"{weights_pct[i]:.2f}%", f"{cum_return(indiv_cum[t])*100:,.2f}%",
+                 f"{sharpe_from_prices(indiv_cum[t], rf_annual_pct=rf, periods_per_year=ann):.2f}"])
+summary = pd.DataFrame(rows, columns=["Ticker","Weight","Cumulative Return","Sharpe Ratio"])
+summary.loc[len(summary)] = ["Portfolio","100.00%", f"{port_cum_return*100:,.2f}%", f"{port_sharpe:,.2f}"]
 
 if show_table:
     st.subheader("Performance Summary")
