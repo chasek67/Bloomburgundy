@@ -6,36 +6,30 @@ import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
 
-# ---------------- Page Setup & Theme ----------------
 st.set_page_config(page_title="Stock Comparison", layout="wide")
 
 st.markdown("""
 <style>
-  /* Sidebar readable + dark */
-  [data-testid="stSidebar"] {
-    background-color: #111 !important;
-    color: #eee !important;
-  }
+  [data-testid="stSidebar"] { background-color: #111 !important; color: #eee !important; }
   [data-testid="stSidebar"] * { color: #eee !important; }
   [data-testid="stSidebarNav"] a { color: #cfe1ff !important; }
   [data-testid="stSidebarNav"] a:hover { background: #1d1f23 !important; }
-  /* App background */
   .stApp { background-color: #0e0e0e; color: #e6e6e6; }
   .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
+  .status { font-size:0.9rem; color:#ddd; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Stock Comparison")
 
-# ---------------- Controls ----------------
 with st.sidebar:
     st.header("Controls")
     tickers_input = st.text_input("Tickers (comma-separated)", "AAPL,MSFT,GOOGL,AMZN")
-    horizon = st.selectbox("Time Horizon", ["3M", "6M", "1Y", "2Y", "5Y", "YTD", "Max"], index=2)
-    sampling = st.selectbox("Sampling Frequency", ["Daily", "Weekly", "Monthly"], index=0)
+    horizon = st.selectbox("Time Horizon", ["3M","6M","1Y","2Y","5Y","YTD","Max"], index=2)
+    sampling = st.selectbox("Sampling Frequency", ["Daily","Weekly","Monthly"], index=0)
     rebased = st.checkbox("Normalize to 100 (rebased)", True)
     log_scale = st.checkbox("Log scale", False)
-    extras = st.multiselect("Extras", ["Correlation Heatmap", "30D Rolling Volatility", "Return Distribution"],
+    extras = st.multiselect("Extras", ["Correlation Heatmap","30D Rolling Volatility","Return Distribution"],
                             default=["Correlation Heatmap"])
 
 def _period(h: str) -> str:
@@ -48,85 +42,96 @@ tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
 if not tickers:
     st.stop()
 
-# ---------------- Robust Data Loader ----------------
+# ---- same robust loader as Portfolio page ----
 DATA_DIR = Path("Data")
 
-def load_from_combined_csv(tickers, data_dir=DATA_DIR):
-    p = data_dir / "prices_combined.csv"
-    if not p.exists():
-        return None
-    df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
-    cols = []
-    for t in tickers:
-        if ("Adj Close", t) in df.columns:
-            cols.append(df[("Adj Close", t)].rename(t))
-        elif ("Close", t) in df.columns:
-            cols.append(df[("Close", t)].rename(t))
-    if not cols:
-        return None
-    return pd.concat(cols, axis=1).sort_index().dropna(how="all")
+def _read_csv_robust(path, header_rows):
+    for enc in ("utf-8", "utf-8-sig", "latin-1"):
+        for eng in ("python", "c"):
+            try:
+                return pd.read_csv(path, index_col=0, header=header_rows,
+                                   parse_dates=True, encoding=enc, engine=eng,
+                                   on_bad_lines="skip")
+            except Exception:
+                continue
+    return None
 
-def load_from_per_ticker_csvs(tickers, data_dir=DATA_DIR):
-    series = []
+def _load_from_combined_csv(tickers):
+    p = DATA_DIR / "prices_combined.csv"
+    if not p.exists(): return None
+    df = _read_csv_robust(p, header_rows=[0,1])
+    if df is not None and isinstance(df.columns, pd.MultiIndex):
+        cols = []
+        for t in tickers:
+            if ("Adj Close", t) in df.columns:
+                cols.append(df[("Adj Close", t)].rename(t))
+            elif ("Close", t) in df.columns:
+                cols.append(df[("Close", t)].rename(t))
+        if cols:
+            return pd.concat(cols, axis=1).sort_index().dropna(how="all")
+    df2 = _read_csv_robust(p, header_rows=0)
+    if df2 is not None:
+        df2 = df2.rename(columns={c:c.upper() for c in df2.columns})
+        keep = [t for t in [x.upper() for x in tickers] if t in df2.columns]
+        if keep:
+            return df2[keep].sort_index().dropna(how="all")
+    return None
+
+def _load_from_per_ticker_csvs(tickers):
+    frames = []
     for t in tickers:
-        p = data_dir / f"{t}.csv"
-        if not p.exists():
-            return None
-        df = pd.read_csv(p, index_col=0, header=[0,1], parse_dates=True)
-        if ("Adj Close", t) in df.columns:
-            series.append(df[("Adj Close", t)].rename(t))
-        elif ("Close", t) in df.columns:
-            series.append(df[("Close", t)].rename(t))
-        else:
-            return None
-    return pd.concat(series, axis=1).sort_index().dropna(how="all")
+        p = DATA_DIR / f"{t}.csv"
+        if not p.exists(): return None
+        df = _read_csv_robust(p, header_rows=[0,1])
+        if df is not None and isinstance(df.columns, pd.MultiIndex):
+            if ("Adj Close", t) in df.columns:
+                frames.append(df[("Adj Close", t)].rename(t)); continue
+            if ("Close", t) in df.columns:
+                frames.append(df[("Close", t)].rename(t)); continue
+        df2 = _read_csv_robust(p, header_rows=0)
+        if df2 is None: return None
+        col = "Adj Close" if "Adj Close" in df2.columns else ("Close" if "Close" in df2.columns else None)
+        if col is None: return None
+        frames.append(df2[col].rename(t))
+    return pd.concat(frames, axis=1).sort_index().dropna(how="all")
 
 @st.cache_data(show_spinner=False)
 def load_prices(tickers, period):
-    # 1) Try Yahoo (auto_adjust=True → use "Close")
     try:
         df = yf.download(tickers, period=period, auto_adjust=True, group_by="ticker", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
-            # Multi-ticker: take "Close" level only
-            if "Close" in df.columns.get_level_values(0):
-                df = df["Close"]
-            elif "Adj Close" in df.columns.get_level_values(0):
-                df = df["Adj Close"]
-            else:
-                raise KeyError("Neither Close nor Adj Close in Yahoo result.")
+            if "Close" in df.columns.get_level_values(0): df = df["Close"]
+            elif "Adj Close" in df.columns.get_level_values(0): df = df["Adj Close"]
+            else: raise KeyError("No Close/Adj Close")
         else:
-            # Single ticker
-            if "Close" in df.columns:
-                df = df[["Close"]]
-            elif "Adj Close" in df.columns:
-                df = df[["Adj Close"]]
+            if "Close" in df.columns: df = df[["Close"]]
+            elif "Adj Close" in df.columns: df = df[["Adj Close"]]
             df.columns = [tickers[0]]
         df = df.dropna(how="all")
-        if df.empty:
-            raise ValueError("Empty Yahoo data")
-        return df
+        if df.empty: raise ValueError("Empty Yahoo")
+        return df, "Yahoo Finance"
     except Exception:
         pass
 
-    # 2) Fallback to combined CSV
-    local = load_from_combined_csv(tickers)
-    if local is not None and not local.empty:
-        return local
+    local = _load_from_combined_csv(tickers)
+    if local is not None and not local.empty: return local, "Data/prices_combined.csv"
 
-    # 3) Fallback to per-ticker CSVs
-    local2 = load_from_per_ticker_csvs(tickers)
-    if local2 is not None and not local2.empty:
-        return local2
+    local2 = _load_from_per_ticker_csvs(tickers)
+    if local2 is not None and not local2.empty: return local2, "Data/<ticker>.csv files"
 
-    raise RuntimeError("No data from Yahoo or local CSVs. Add CSVs under Data/ or check tickers.")
+    return None, None
 
-# ---------------- Fetch & Prep ----------------
-try:
-    prices_raw = load_prices(tickers, _period(horizon))
-except Exception as e:
-    st.error(f"Error loading data: {e}")
+prices_raw, source = load_prices(tickers, _period(horizon))
+if prices_raw is None:
+    st.error("No data from Yahoo or local CSVs. Verify tickers and that Data/prices_combined.csv exists.")
     st.stop()
 
+with st.expander("Data source & columns", expanded=False):
+    st.markdown(f"<div class='status'>Source: <b>{source}</b></div>", unsafe_allow_html=True)
+    st.write("Columns loaded:", list(prices_raw.columns))
+    st.write("Rows:", len(prices_raw))
+
+# Resample
 prices = prices_raw.resample(_to_freq(sampling)).last().dropna(how="all")
 rets = prices.pct_change().fillna(0.0)
 cum = (1 + rets).cumprod()
@@ -136,7 +141,6 @@ color_map = {t: palette[i % len(palette)] for i, t in enumerate(prices.columns)}
 
 left, right = st.columns([2,1])
 
-# ---------------- Charts ----------------
 with left:
     if rebased:
         base = cum.iloc[0]
