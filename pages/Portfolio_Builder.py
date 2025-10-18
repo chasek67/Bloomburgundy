@@ -10,15 +10,38 @@ st.set_page_config(page_title="Portfolio Builder", layout="wide")
 # --- Local page CSS (kept here too, in case main isn't loaded) ---
 st.markdown("""
 <style>
-  [data-testid="stSidebar"] { background-color: #111 !important; color: #eee !important; }
+  /* Sidebar container */
+  [data-testid="stSidebar"] {
+    background-color: #111 !important;
+    color: #eee !important;
+  }
   [data-testid="stSidebar"] * { color: #eee !important; }
   [data-testid="stSidebarNav"] a { color: #cfe1ff !important; }
   [data-testid="stSidebarNav"] a:hover { background: #1d1f23 !important; }
   .stApp { background-color: #0e0e0e; color: #e6e6e6; }
-  .metric-card { background:#1a1a1a;padding:12px;border-radius:12px;border:1px solid #333; }
+
+  /* === Make text inputs readable (black text, light background) === */
+  .stTextInput input,
+  .stNumberInput input,
+  .stSelectbox div[data-baseweb="select"],
+  .stDateInput input {
+      background-color: #f2f2f2 !important;   /* light gray background */
+      color: #111 !important;                 /* black text */
+      border: 1px solid #444 !important;
+      border-radius: 6px !important;
+  }
+  /* Dropdown text color */
+  div[data-baseweb="select"] span {
+      color: #111 !important;
+  }
+
+  /* Keep other elements dark */
+  .stButton button { background:#242424 !important; color:#e6e6e6 !important; }
+  .metric-card { background:#1a1a1a; padding:12px; border-radius:12px; border:1px solid #333; }
   .status { font-size:0.9rem; color:#ddd; }
 </style>
 """, unsafe_allow_html=True)
+
 
 st.title("💼 Portfolio Builder")
 
