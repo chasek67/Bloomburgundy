@@ -1,4 +1,4 @@
-
+# make_price_csvs.py
 import pandas as pd
 import yfinance as yf
 from pathlib import Path
@@ -6,31 +6,29 @@ from pathlib import Path
 DATA_DIR = Path("Data")
 DATA_DIR.mkdir(exist_ok=True)
 
+# 20+ tickers for fallback dataset
 TICKERS = [
     "AAPL","MSFT","GOOGL","AMZN","META",
     "NVDA","TSLA","JPM","V","MA",
     "HD","PG","UNH","XOM","JNJ",
-    "WMT","KO","PEP","NFLX","DIS",
-    "AMD","INTC","BA","NKE","PYPL"
+    "WMT","KO","PEP","NFLX","DIS"
 ]
 
-period = "5y"
-interval = "1d"
+print("Downloading stock data (5 years daily)...")
 
-print("Downloading combined matrix...")
-# combined with multiindex columns: ('Adj Close'/'Close', TICKER)
-df_all = yf.download(TICKERS, period=period, interval=interval, auto_adjust=False, group_by="ticker")
-# yfinance multi-ticker returns MultiIndex columns at top level: (field, ticker)
-# Ensure expected ordering and write
-df_all.to_csv(DATA_DIR / "prices_combined.csv")
+# Download multi-ticker data
+df_all = yf.download(TICKERS, period="5y", interval="1d", auto_adjust=False, group_by="ticker", progress=False)
 
-print("Downloading individual files...")
+# Ensure MultiIndex columns are preserved
+df_all.to_csv(DATA_DIR / "prices_combined.csv", quoting=0)
+print("✅ Saved Data/prices_combined.csv")
+
+# Save single-ticker CSVs too
 for t in TICKERS:
-    df = yf.download(t, period=period, interval=interval, auto_adjust=False, group_by="ticker")
-    # single ticker can return single-level cols; convert to MultiIndex for consistency
+    print("Saving:", t)
+    df = yf.download(t, period="5y", interval="1d", auto_adjust=False, progress=False)
     if not isinstance(df.columns, pd.MultiIndex):
         df.columns = pd.MultiIndex.from_product([df.columns, [t]])
-    df.to_csv(DATA_DIR / f"{t}.csv")
+    df.to_csv(DATA_DIR / f"{t}.csv", quoting=0)
 
-print("Done. Files saved under Data/")
-
+print("✅ Done. All CSVs written cleanly to Data/")
